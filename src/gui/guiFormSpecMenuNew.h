@@ -1,0 +1,337 @@
+/*
+Minetest
+Copyright (C) 2013-2018 celeron55, Perttu Ahola <celeron55@gmail.com>
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+*/
+
+#pragma once
+
+#include <utility>
+#include <memory>
+
+#include "irrlichttypes_extrabloated.h"
+#include "inventorymanager.h"
+#include "modalMenu.h"
+#include "network/networkprotocol.h"
+#include "client/joystick_controller.h"
+#include "client/hud.h" // drawItemStack
+#include "util/string.h"
+#include "util/enriched_string.h"
+
+class InventoryManager;
+class ISimpleTextureSource;
+class Client;
+
+typedef enum {
+	ELEMENT_BEGINRECT,
+	ELEMENT_ENDRECT,
+	ELEMENT_BGCOLOR,
+	ELEMENT_INVENTORY,
+	ELEMENT_BUTTON,
+	ELEMENT_TEXT,
+	ELEMENT_IMAGE,
+	ELEMENT_ASPECT,
+	ELEMENT_STYLE
+} FormSpecElementType;
+
+typedef enum {
+	ELEMENT_STYLE_NONE    = 0x00,
+	ELEMENT_STYLE_BGCOLOR = 0x01,
+	ELEMENT_STYLE_IMAGE   = 0x02
+} FormSpecElementStyle;
+
+typedef enum {
+	FORMSPEC_TEXT_ALIGN_CENTER = 0x00,
+	FORMSPEC_TEXT_ALIGN_LEFT = 0x01,
+	FORMSPEC_TEXT_ALIGN_RIGHT = 0x02,
+	FORMSPEC_TEXT_ALIGN_TOP = 0x04,
+	FORMSPEC_TEXT_ALIGN_BOTTOM = 0x08
+} FormspecTextAlign;
+
+class StyleSpec {
+public:
+	StyleSpec() = default;
+	StyleSpec(const StyleSpec &spec) :
+		buttonStandard(spec.buttonStandard),
+		buttonHover(spec.buttonHover),
+		buttonPressed(spec.buttonPressed),
+		inventoryBGColor(spec.inventoryBGColor),
+		inventoryBorderColor(spec.inventoryBorderColor),
+		border(spec.border),
+		align(spec.align) { }
+	void drawButtonStandard(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUISkin *skin);
+	void drawButtonHover(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUISkin *skin);
+	void drawButtonPressed(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUISkin *skin);
+	void drawInventorySlot(video::IVideoDriver *driver, gui::IGUISkin *skin, const ItemStack &item,
+		core::rect<s32> arect, Client *client, ItemRotationKind rot);
+
+	void setButtonStandard(video::ITexture *tex) { buttonStandard = tex; }
+	void setButtonHover(video::ITexture *tex) { buttonHover = tex; }
+	void setButtonPressed(video::ITexture *tex) { buttonPressed = tex; }
+	void setInventoryBGColor(const video::SColor &color) { inventoryBGColor = color; }
+	void setInventoryBorderColor(const video::SColor &color) { inventoryBorderColor = color; }
+	void setInventoryBorder(s32 border) { this->border = border; }
+	void setTextAlign(u8 align) { this->align = align; }
+	u8 getTextAlign() { return align; }
+private:
+	video::ITexture *buttonStandard = nullptr;
+	video::ITexture *buttonHover = nullptr;
+	video::ITexture *buttonPressed = nullptr;
+
+	video::SColor inventoryBGColor = video::SColor(255,128,128,128);
+	video::SColor inventoryBorderColor = video::SColor(200,0,0,0);
+	s32 border = 1;
+
+	u8 align = FORMSPEC_TEXT_ALIGN_CENTER;
+};
+
+class TextSpec {
+public:
+	TextSpec(const std::string &t) : text(t) { }
+	void draw(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUIFont *font);
+
+	void rebuild(const core::rect<s32> &arect, gui::IGUIFont *font, StyleSpec *style);
+private:
+	void addLine(const core::rect<s32> &arect, v2s32 pos,
+		const core::dimension2d<u32> &dim, const core::stringw &line);
+
+	std::string text;
+	std::vector<std::pair<core::stringw, core::rect<s32>>> lines;
+	u8 alignment = FORMSPEC_TEXT_ALIGN_CENTER;
+};
+
+class GUIFormSpecMenuElement {
+public:
+	GUIFormSpecMenuElement(const std::shared_ptr<StyleSpec> &style) {
+		styleSpec = style;
+	}
+	GUIFormSpecMenuElement(GUIFormSpecMenuElement &&element) :
+		rect(element.rect),
+	       	bg(element.bg),
+		image(element.image),
+		styleSpec(std::move(element.styleSpec)),
+		children(std::move(element.children)),
+		text(std::move(element.text)),
+       		style(element.style){ }
+
+	void addChild(std::unique_ptr<GUIFormSpecMenuElement> &element) {
+		children.push_back(std::move(element));
+	}
+
+	const std::vector<std::unique_ptr<GUIFormSpecMenuElement>> &getChildren() {
+		return children;
+	}
+	bool hasChildren() { return children.size() > 0; }
+
+	void setDimensions(const core::rect<float> &r) { rect = r; }
+	const core::rect<float> &getDimensions() { return rect; }
+	void setAspect(float aspect) { this->aspect = aspect;  }
+	void setBGColor(const video::SColor &c) { bg = c; style |= ELEMENT_STYLE_BGCOLOR; }
+	void setImage(video::ITexture *img) { image = img; style |= ELEMENT_STYLE_IMAGE; }
+	void setText(const std::string &t);
+
+	const std::shared_ptr<StyleSpec> getStyle() { return styleSpec; }
+	void setStyle(const std::shared_ptr<StyleSpec> styleSpec) {
+		this->styleSpec = styleSpec;
+	}
+
+	virtual void rebuild(const core::rect<s32> &parent_rect, gui::IGUIFont *font);
+
+	virtual bool isRect() { return true; }
+
+	virtual void hover(bool hovering) { }
+	virtual GUIFormSpecMenuElement *getElementAtPos(const v2s32 &pos) {
+		if (!arect.isPointInside(pos))
+			return nullptr;
+		GUIFormSpecMenuElement *element = nullptr;
+		// iterate backwards to get the last drawn Element first due to layering.
+		for (auto it = children.rbegin(); it != children.rend(); ++it) {
+			element = (*it)->getElementAtPos(pos);
+			if (element)
+				return element;
+		}
+		return nullptr;
+	}
+
+	virtual void mouseDown(const v2s32 &pos) { }
+	virtual void mouseUp(const v2s32 &pos) { }
+
+	virtual void draw(video::IVideoDriver *driver, gui::IGUISkin *skin);
+
+protected:
+	virtual void drawChildren(video::IVideoDriver *driver, gui::IGUISkin *skin);
+	void drawText(video::IVideoDriver *driver, gui::IGUIFont *font);
+
+	core::rect<float> rect = core::rect<float>(0.f, 0.f, 1.f, 1.f);
+	core::rect<s32> arect;
+	video::SColor bg;
+
+	video::ITexture *image = nullptr;
+
+	std::shared_ptr<StyleSpec> styleSpec;
+
+private:
+	std::vector<std::unique_ptr<GUIFormSpecMenuElement>> children;
+	std::unique_ptr<TextSpec> text = nullptr;
+
+	float aspect = 0.f;
+
+	u8 style = ELEMENT_STYLE_NONE;
+};
+
+class GUIFormSpecMenuElementButton : public GUIFormSpecMenuElement {
+public:
+	GUIFormSpecMenuElementButton(GUIFormSpecMenuElement &&element) :
+		GUIFormSpecMenuElement(std::move(element)) { }
+
+	virtual void draw(video::IVideoDriver *driver, gui::IGUISkin *skin);
+	virtual bool isRect() { return false; }
+
+	virtual void hover(bool hovering) { hovered = hovering; }
+	virtual GUIFormSpecMenuElement *getElementAtPos(const v2s32 &pos) {
+		if (arect.isPointInside(pos))
+			return this;
+		return nullptr;
+	}
+	virtual void mouseDown(const v2s32 &pos) { clicked = true; }
+	virtual void mouseUp(const v2s32 &pos) { clicked = false; }
+private:
+	bool hovered = false;
+	bool clicked = false;
+};
+
+class GUIFormSpecMenuElementInventory : public GUIFormSpecMenuElement {
+public:
+	GUIFormSpecMenuElementInventory(GUIFormSpecMenuElement &&element) :
+		GUIFormSpecMenuElement(std::move(element)) { }
+
+	virtual void rebuild(const core::rect<s32> &parent_rect, gui::IGUIFont *font);
+	virtual void draw(video::IVideoDriver *driver, gui::IGUISkin *skin);
+
+	void setInventoryDimensions(u16 x, u16 y) { this->x = x; this->y = y; }
+	void setList(InventoryManager *invmgr, const std::string &location, const std::string &listname, Client *client) {
+		this->invmgr = invmgr;
+		this->location = location;
+		this->listname = listname;
+		this->client = client;
+	}
+
+private:
+	Client *client = nullptr;
+	InventoryManager *invmgr;
+	std::string location;
+	std::string listname;
+
+	u16 x, y = 1;
+	v2f padding;
+	core::dimension2d<float> itemSize;
+};
+
+class GUIFormSpecMenuNew : public GUIModalMenu
+{
+public:
+	GUIFormSpecMenuNew(JoystickController *joystick,
+			gui::IGUIElement* parent, s32 id,
+			IMenuManager *menumgr,
+			Client *client,
+			ISimpleTextureSource *tsrc,
+			const std::string &source,
+			bool remap_dbl_click = true);
+
+	~GUIFormSpecMenuNew();
+
+	static void create(GUIFormSpecMenuNew *&cur_formspec, Client *client,
+			JoystickController *joystick, const std::string &source);
+	void setFormSource(const std::string &source) {
+		m_formspec_string = source;
+	}
+
+	void regenerateGui(v2u32 screensize);
+
+	void drawMenu();
+	
+	bool preprocessEvent(const SEvent& event);
+	bool OnEvent(const SEvent& event);
+
+#ifdef __ANDROID__
+	bool getAndroidUIInput();
+#endif
+
+protected:
+	InventoryManager *m_invmgr;
+	ISimpleTextureSource *m_tsrc;
+	Client *m_client;
+
+	std::string m_formspec_string;
+
+	v2s32 m_pointer;
+	v2s32 m_old_pointer;  // Mouse position after previous mouse event
+
+	bool m_allowclose = true;
+
+	void hover(GUIFormSpecMenuElement *element) {
+		if (hovered) {
+			if (hovered == element)
+				return;
+			hovered->hover(false);
+		}
+		hovered = element;
+		if (hovered)
+			hovered->hover(true);
+	}
+
+private:
+	JoystickController *m_joystick;
+
+	std::unique_ptr<GUIFormSpecMenuElement> forms = nullptr;
+
+	GUIFormSpecMenuElement *hovered = nullptr;
+	GUIFormSpecMenuElement *clicked = nullptr;
+
+	void tryClose();
+
+	/**
+	 * check if event is part of a double click
+	 * @param event event to evaluate
+	 * @return true/false if a doubleclick was detected
+	 */
+	bool DoubleClickDetection(const SEvent event);
+
+	struct clickpos
+	{
+		v2s32 pos;
+		s64 time;
+	};
+	clickpos m_doubleclickdetect[2];
+
+	gui::IGUIFont *m_font = nullptr;
+	std::shared_ptr<StyleSpec> defaultStyle;
+
+#ifdef __ANDROID__
+	v2s32 m_down_pos;
+	std::string m_JavaDialogFieldName;
+#endif
+
+	/* If true, remap a double-click (or double-tap) action to ESC. This is so
+	 * that, for example, Android users can double-tap to close a formspec.
+	*
+	 * This value can (currently) only be set by the class constructor
+	 * and the default value for the setting is true.
+	 */
+	bool m_remap_dbl_click;
+
+};
+

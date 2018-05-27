@@ -43,6 +43,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "gui/guiChatConsole.h"
 #include "gui/guiConfirmRegistration.h"
 #include "gui/guiFormSpecMenu.h"
+#include "gui/guiFormSpecMenuNew.h"
 #include "gui/guiKeyChangeMenu.h"
 #include "gui/guiPasswordChange.h"
 #include "gui/guiVolumeChange.h"
@@ -782,6 +783,7 @@ private:
 	void handleClientEvent_PlayerForceMove(ClientEvent *event, CameraOrientation *cam);
 	void handleClientEvent_Deathscreen(ClientEvent *event, CameraOrientation *cam);
 	void handleClientEvent_ShowFormSpec(ClientEvent *event, CameraOrientation *cam);
+	void handleClientEvent_ShowFormSpecNew(ClientEvent *event, CameraOrientation *cam);
 	void handleClientEvent_ShowLocalFormSpec(ClientEvent *event, CameraOrientation *cam);
 	void handleClientEvent_HandleParticleEvent(ClientEvent *event,
 		CameraOrientation *cam);
@@ -821,6 +823,10 @@ private:
 	GUIFormSpecMenu *current_formspec = nullptr;
 	//default: "". If other than "", empty show_formspec packets will only close the formspec when the formname matches
 	std::string cur_formname;
+
+	// new formspec
+	GUIFormSpecMenuNew *current_formspec_new = nullptr;
+	std::string cur_formname_new;
 
 	EventManager *eventmgr = nullptr;
 	QuicktuneShortcutter *quicktune = nullptr;
@@ -1135,6 +1141,8 @@ void Game::shutdown()
 #endif
 	if (current_formspec)
 		current_formspec->quitMenu();
+	if (current_formspec_new)
+		current_formspec_new->quitMenu();
 
 	showOverlayMessage("Shutting down...", 0, 0, false);
 
@@ -1156,6 +1164,11 @@ void Game::shutdown()
 	if (current_formspec) {
 		current_formspec->drop();
 		current_formspec = NULL;
+	}
+
+	if (current_formspec) {
+		current_formspec_new->drop();
+		current_formspec_new = nullptr;
 	}
 
 	chat_backend->addMessage(L"", L"# Disconnected.");
@@ -2467,6 +2480,7 @@ const ClientEventHandler Game::clientEventHandler[CLIENTEVENT_MAX] = {
 	{&Game::handleClientEvent_PlayerForceMove},
 	{&Game::handleClientEvent_Deathscreen},
 	{&Game::handleClientEvent_ShowFormSpec},
+	{&Game::handleClientEvent_ShowFormSpecNew},
 	{&Game::handleClientEvent_ShowLocalFormSpec},
 	{&Game::handleClientEvent_HandleParticleEvent},
 	{&Game::handleClientEvent_HandleParticleEvent},
@@ -2540,6 +2554,23 @@ void Game::handleClientEvent_ShowFormSpec(ClientEvent *event, CameraOrientation 
 		GUIFormSpecMenu::create(current_formspec, client, &input->joystick,
 			fs_src, txt_dst, client->getFormspecPrepend());
 		cur_formname = *(event->show_formspec.formname);
+	}
+
+	delete event->show_formspec.formspec;
+	delete event->show_formspec.formname;
+}
+
+void Game::handleClientEvent_ShowFormSpecNew(ClientEvent *event, CameraOrientation *cam)
+{
+	if (event->show_formspec.formspec->empty()) {
+		if (current_formspec_new && (event->show_formspec.formname->empty()
+			|| *(event->show_formspec.formname) == cur_formname)) {
+			current_formspec_new->quitMenu();
+		}
+	} else {
+		GUIFormSpecMenuNew::create(current_formspec_new, client,
+			&input->joystick, *(event->show_formspec.formspec));
+		cur_formname_new = *(event->show_formspec.formname);
 	}
 
 	delete event->show_formspec.formspec;
@@ -3791,6 +3822,15 @@ void Game::updateFrame(ProfilerGraph *graph, RunStats *stats, f32 dtime,
 			current_formspec = NULL;
 		} else if (isMenuActive()) {
 			guiroot->bringToFront(current_formspec);
+		}
+	}
+
+	if (current_formspec_new) {
+		if (current_formspec_new->getReferenceCount() == 1) {
+			current_formspec_new->drop();
+			current_formspec_new = NULL;
+		} else if (isMenuActive()) {
+			guiroot->bringToFront(current_formspec_new);
 		}
 	}
 

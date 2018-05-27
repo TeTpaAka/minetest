@@ -61,6 +61,9 @@ private:
 	// show_formspec(playername,formname,formspec)
 	static int l_show_formspec(lua_State *L);
 
+	// show_formspec_new(playername,formname,formspec)
+	static int l_show_formspec_new(lua_State *L);
+
 	// sound_play(spec, parameters)
 	static int l_sound_play(lua_State *L);
 

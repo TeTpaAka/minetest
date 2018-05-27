@@ -284,6 +284,7 @@ public:
 			{ m_async_fatal_error.set(error); }
 
 	bool showFormspec(const char *name, const std::string &formspec, const std::string &formname);
+	bool showFormspecNew(const char *name, const std::string &formspec, const std::string &formname);
 	Map & getMap() { return m_env->getMap(); }
 	ServerEnvironment & getEnv() { return *m_env; }
 	v3f findSpawnPos();
@@ -379,6 +380,8 @@ private:
 	void SendPlayerInventoryFormspec(session_t peer_id);
 	void SendPlayerFormspecPrepend(session_t peer_id);
 	void SendShowFormspecMessage(session_t peer_id, const std::string &formspec,
+		const std::string &formname);
+	void SendShowFormspecMessageNew(session_t peer_id, const std::string &formspec,
 		const std::string &formname);
 	void SendHUDAdd(session_t peer_id, u32 id, HudElement *form);
 	void SendHUDRemove(session_t peer_id, u32 id);

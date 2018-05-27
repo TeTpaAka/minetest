@@ -373,6 +373,23 @@ int ModApiServer::l_show_formspec(lua_State *L)
 	return 1;
 }
 
+// show_formspec_new(playername,formname,formspec)
+int ModApiServer::l_show_formspec_new(lua_State *L)
+{
+	NO_MAP_LOCK_REQUIRED;
+	const char *playername = luaL_checkstring(L, 1);
+	const char *formname = luaL_checkstring(L, 2);
+	const char *formspec = luaL_checkstring(L, 3);
+
+	if(getServer(L)->showFormspecNew(playername,formspec,formname))
+	{
+		lua_pushboolean(L, true);
+	}else{
+		lua_pushboolean(L, false);
+	}
+	return 1;
+}
+
 // get_current_modname()
 int ModApiServer::l_get_current_modname(lua_State *L)
 {
@@ -522,6 +539,7 @@ void ModApiServer::Initialize(lua_State *L, int top)
 	API_FCT(chat_send_all);
 	API_FCT(chat_send_player);
 	API_FCT(show_formspec);
+	API_FCT(show_formspec_new);
 	API_FCT(sound_play);
 	API_FCT(sound_stop);
 	API_FCT(sound_fade);

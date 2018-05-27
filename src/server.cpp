@@ -1553,6 +1553,23 @@ void Server::SendShowFormspecMessage(session_t peer_id, const std::string &forms
 	Send(&pkt);
 }
 
+void Server::SendShowFormspecMessageNew(session_t peer_id, const std::string &formspec,
+                                     const std::string &formname)
+{
+	NetworkPacket pkt(TOCLIENT_SHOW_FORMSPEC_NEW, 0 , peer_id);
+	if (formspec.empty()){
+		//the client should close the formspec
+		m_formspec_state_data.erase(peer_id);
+		pkt.putLongString("");
+	} else {
+		m_formspec_state_data[peer_id] = formname;
+		pkt.putLongString(formspec);
+	}
+	pkt << formname;
+
+	Send(&pkt);
+}
+
 // Spawns a particle on peer with peer_id
 void Server::SendSpawnParticle(session_t peer_id, u16 protocol_version,
 				v3f pos, v3f velocity, v3f acceleration,
@@ -2993,6 +3010,21 @@ bool Server::showFormspec(const char *playername, const std::string &formspec,
 		return false;
 
 	SendShowFormspecMessage(player->getPeerId(), formspec, formname);
+	return true;
+}
+
+bool Server::showFormspecNew(const char *playername, const std::string &formspec,
+	const std::string &formname)
+{
+	// m_env will be NULL if the server is initializing
+	if (!m_env)
+		return false;
+
+	RemotePlayer *player = m_env->getPlayer(playername);
+	if (!player)
+		return false;
+
+	SendShowFormspecMessageNew(player->getPeerId(), formspec, formname);
 	return true;
 }
 

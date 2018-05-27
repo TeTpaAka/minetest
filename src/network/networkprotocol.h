@@ -637,6 +637,15 @@ enum ToClientCommand
 	 	std::string channel name
 	 */
 
+	TOCLIENT_SHOW_FORMSPEC_NEW = 0x59,
+	/*
+		[0] u16 command
+		u32 len
+		u8[len] formspec
+		u16 len
+		u8[len] formname
+	*/
+
 	TOCLIENT_SRP_BYTES_S_B = 0x60,
 	/*
 		Belonging to AUTH_MECHANISM_SRP.
