@@ -92,78 +92,93 @@ void GUIFormSpecMenuNew::create(GUIFormSpecMenuNew *&cur_formspec, Client *clien
 
 	} else {
 		cur_formspec->setFormSource(source);
+		cur_formspec->needsReparse = true;
 	}
 }
 
 void GUIFormSpecMenuElement::setText(const std::string &t) {
-	text = std::unique_ptr<TextSpec>(new TextSpec(t));
+	std::wstring lw = utf8_to_wide(unescape_string(t));
+	text = std::unique_ptr<TextSpec>(new TextSpec(core::stringw(lw.c_str(), lw.size())));
 }
 
 
-void TextSpec::addLine(const core::rect<s32> &arect, v2s32 pos,
+void TextSpec::addLine(const core::rect<s32> &arect, v2s32 &pos,
 		const core::dimension2d<u32> &dim, const core::stringw &line)
 {
+	v2s32 shift_pos = pos;
 	if (alignment & FORMSPEC_TEXT_ALIGN_RIGHT) {
-		pos.X = arect.LowerRightCorner.X - dim.Width;
+		shift_pos.X = arect.LowerRightCorner.X - dim.Width;
 	} else if (!(alignment & FORMSPEC_TEXT_ALIGN_LEFT)) {
 		s32 offset = arect.getWidth() - dim.Width;
-		pos.X += offset / 2;
+		shift_pos.X += offset / 2;
 	}
-	lines.emplace_back(std::pair<core::stringw, core::rect<s32>>(line, core::rect<s32>(pos, dim)));
+	lines.emplace_back(std::pair<core::stringw, core::rect<s32>>(line, core::rect<s32>(shift_pos, dim)));
+	pos.Y += dim.Height;
 }
 
-void TextSpec::rebuild(const core::rect<s32> &arect, gui::IGUIFont *font, StyleSpec *style) {
+void TextSpec::rebuild(const core::rect<s32> &arect, StyleSpec *style) {
+	gui::IGUIFont *font = style->getFont();
+	alignment = style->getTextAlign();
+
 	lines.clear();
 	u32 width = arect.getWidth();
 	v2s32 pos = arect.UpperLeftCorner;
 
-	alignment = style->getTextAlign();
+	// calculate the starting offset of every line
+	std::vector<u32> line_starts;
 
-	std::vector<std::string> raw_lines = split(text, '\n');
-	for (const std::string &l : raw_lines) {
-		std::wstring lw = utf8_to_wide(unescape_string(l));
-		core::stringw lw_i(lw.c_str(), lw.size());
-		core::dimension2d<u32> dim = font->getDimension(lw.c_str());
-		if (dim.Width > width) {
-			// word wrapping
-			std::vector<core::stringw> words;
-			lw_i.split(words, L" ", 1, true, true);
-			core::stringw split_line;
-			u32 line_width = 0;
-			for (const core::stringw &w : words) {
-				core::dimension2d<u32> word_dim = font->getDimension(w.c_str());
-				line_width += word_dim.Width;
-				if (line_width > width) {
-					bool empty_line = split_line.size() == 0;
-					// split line
-					if (empty_line) {
-						// don't create empty lines
-						split_line = w;
-						line_width = 0;
-					}
+	u32 line_width = 0;
+	u32 line_begin = 0;
+	u32 word_begin = 0;
+	u32 word_end = 0;
 
-					split_line.trim(L" ");
-					dim = font->getDimension(split_line.c_str());
-					addLine(arect, pos, dim, split_line);
-					if (!empty_line) {
-						split_line = w;
-						line_width = word_dim.Width;
-					}
-					pos.Y += dim.Height;
-				} else {
-					split_line += w;
-				}
-
+	bool last_space = true;
+	u32 size = text.size();
+	for (u32 i = 0; i < size; ++i) {
+		if (text[i] == L'\n') {
+			// forced newline
+			core::stringw line = core::stringw(text.c_str() + line_begin, i - line_begin);
+			core::dimension2d<u32> dim = font->getDimension(line.c_str());
+			addLine(arect, pos, dim, line);
+			line_starts.push_back(line_begin); // keep the newline symbol for the cursor
+			line_begin = i;
+			word_end = i;
+			word_begin = i;
+			last_space = true;
+			line_width = 0;
+		} else if (text[i] == L' ' || i == size - 1) {
+			/*// word wrap
+			core::stringw word = core::stringw(text.c_str() + word_end, i - word_end); // keep the space
+			core::dimension2d<u32> dim = font->getDimension(word.c_str());
+			line_width += dim.Width;
+			if (line_width > width) {
+				// new line
+				core::stringw line = core::stringw(text.c_str() + line_begin, word_end - line_begin);
+				dim = font->getDimension(line.c_str());
+				addLine(arect, pos, dim, line);
+				line_starts.push_back(line_begin);
+				line_begin = word_begin;
+				word = core::stringw(text.c_str() + word_begin, i - word_begin); // without spaces
+				dim = font->getDimension(word.c_str());
+				line_width = dim.Width;
 			}
-			split_line.trim(L" ");
-			dim = font->getDimension(split_line.c_str());
-			addLine(arect, pos, dim, split_line);
-			pos.Y += dim.Height;
+			word_end = i;
+			last_space = true; // */
 		} else {
-			addLine(arect, pos, dim, lw_i);
-			pos.Y += dim.Height;
+			// normal character
+			if (last_space) {
+				// new word
+				word_begin = i;
+				last_space = false;
+			}
 		}
 	}
+	// push remaining characters as new line
+	line_starts.push_back(line_begin);
+	core::stringw line = core::stringw(text.c_str() + line_begin, size - line_begin);
+	core::dimension2d<u32> dim = font->getDimension(line.c_str());
+	addLine(arect, pos, dim, line);
+
 
 	// adjust vertical position of the lines
 	if (alignment & FORMSPEC_TEXT_ALIGN_BOTTOM) {
@@ -186,6 +201,24 @@ void TextSpec::rebuild(const core::rect<s32> &arect, gui::IGUIFont *font, StyleS
 				line.second.LowerRightCorner.Y += offset;
 			}
 		}
+	}
+
+	// find the cursor position
+	if (cursor_pos != (u32)-1) {
+		size_t i = 0;
+		for ( ; i < line_starts.size(); ++i) {
+			if (cursor_pos < line_starts[i]) {
+				// the cursor is in the previous line
+				break;
+			}
+		}
+		// we can safely assume, i is not 0, since cursor_pos is unsigned and the first line starts at 0
+		--i;
+		auto &l = lines[i];
+		u32 end = cursor_pos - line_starts[i];
+		core::dimension2d<u32> dim = font->getDimension(l.first.subString(0, end).c_str());
+		core::dimension2d<u32> cursor_dim = font->getDimension(L"_");
+		cursor = core::rect<s32>(l.second.UpperLeftCorner + v2s32(dim.Width, 0), cursor_dim);
 	}
 }
 
@@ -241,7 +274,32 @@ void GUIFormSpecMenuElement::rebuild(const core::rect<s32> &parent_rect, gui::IG
 	}
 
 	if (text)
-		text->rebuild(arect, font, styleSpec.get());
+		text->rebuild(arect, styleSpec.get());
+}
+
+void GUIFormSpecMenuElementInput::focusChange(const bool focus) {
+	text->setCursorVisibility(focus);
+}
+
+void GUIFormSpecMenuElementInput::keyDown(const SEvent::SKeyInput &k) {
+	if (k.Key == KEY_BACK && cursor_pos != 0) {
+		const core::stringw &t = text->get();
+		u32 length = t.size();
+		core::stringw newString = t.subString(0, cursor_pos - 1);
+		newString += t.subString(cursor_pos, length - cursor_pos);
+		text->set(newString);
+		--cursor_pos;
+	} else if (k.Char) {
+		const core::stringw &t = text->get();
+		u32 length = t.size();
+		core::stringw newString = t.subString(0, cursor_pos);
+		newString += k.Char;
+		newString += t.subString(cursor_pos, length - cursor_pos);
+		text->set(newString);
+		++cursor_pos;
+	}
+	text->setCursorPos(cursor_pos);
+	text->rebuild(arect, styleSpec.get());
 }
 
 static void parseBeginRect(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack) {
@@ -320,6 +378,23 @@ static void parseButton(const std::string &description, std::stack<std::unique_p
 		std::unique_ptr<GUIFormSpecMenuElementButton> button =
 			std::unique_ptr<GUIFormSpecMenuElementButton>(new GUIFormSpecMenuElementButton(std::move(*parent.get())));
 		parent = std::move(button);
+	} else {
+		errorstream << "Attempt to create more than one modifier." << std::endl;
+	}
+}
+
+static void parseInput(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack) {
+	std::vector<std::string> parts = split(description, ',');
+	if (parts.size() < 1) {
+		errorstream << "Invalid input element (" << parts.size() << "): '" << description << "'" << std::endl;
+		return;
+	}
+
+	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
+	if (parent->isRect()) {
+		std::unique_ptr<GUIFormSpecMenuElementInput> input =
+			std::unique_ptr<GUIFormSpecMenuElementInput>(new GUIFormSpecMenuElementInput(std::move(*parent.get())));
+		parent = std::move(input);
 	} else {
 		errorstream << "Attempt to create more than one modifier." << std::endl;
 	}
@@ -430,6 +505,7 @@ static std::unordered_map<std::string, FormSpecElementType> formSpecElementTypes
 	{ "bgcolor", ELEMENT_BGCOLOR },
 	{ "inventory", ELEMENT_INVENTORY },
 	{ "button", ELEMENT_BUTTON },
+	{ "input", ELEMENT_INPUT },
 	{ "text", ELEMENT_TEXT },
 	{ "image", ELEMENT_IMAGE },
 	{ "aspect", ELEMENT_ASPECT },
@@ -488,6 +564,9 @@ static void parseElement(const std::string &element, std::stack<std::unique_ptr<
 		case ELEMENT_BUTTON:
 			parseButton(description, stack);
 			break;
+		case ELEMENT_INPUT:
+			parseInput(description, stack);
+			break;
 		case ELEMENT_TEXT:
 			parseText(description, stack);
 			break;
@@ -512,29 +591,32 @@ void GUIFormSpecMenuNew::regenerateGui(v2u32 screensize)
 		return;
 	}
 
-	std::vector<std::string> elements = split(m_formspec_string,']');
-	std::stack<std::unique_ptr<GUIFormSpecMenuElement>> form_stack;
+	if (needsReparse) {
+		std::vector<std::string> elements = split(m_formspec_string,']');
+		std::stack<std::unique_ptr<GUIFormSpecMenuElement>> form_stack;
 
-	// insert start proxy
-	defaultStyle = std::shared_ptr<StyleSpec>(new StyleSpec());
-	form_stack.emplace(new GUIFormSpecMenuElement(defaultStyle));
-	for (const std::string &element : elements) {
-		parseElement(element, form_stack, m_tsrc, m_client, m_invmgr);
-	}
-	if (form_stack.size() != 1) {
-		errorstream << "Mismatch of beginrect and endrect tags. Dropping formspec." << std::endl;
-		forms = nullptr;
-		quitMenu();
-		return;
-	}
-	forms = std::move(form_stack.top());
-	form_stack.pop();
-	const std::vector<std::unique_ptr<GUIFormSpecMenuElement>> &children = forms->getChildren();
-	if (children.size() < 1) {
-		errorstream << "No windows defined. Dropping formspec." << std::endl;
-		forms = nullptr;
-		quitMenu();
-		return;
+		// insert start proxy
+		defaultStyle = std::shared_ptr<StyleSpec>(new StyleSpec(g_fontengine->getFont()));
+		form_stack.emplace(new GUIFormSpecMenuElement(defaultStyle));
+		for (const std::string &element : elements) {
+			parseElement(element, form_stack, m_tsrc, m_client, m_invmgr);
+		}
+		if (form_stack.size() != 1) {
+			errorstream << "Mismatch of beginrect and endrect tags. Dropping formspec." << std::endl;
+			forms = nullptr;
+			quitMenu();
+			return;
+		}
+		forms = std::move(form_stack.top());
+		form_stack.pop();
+		const std::vector<std::unique_ptr<GUIFormSpecMenuElement>> &children = forms->getChildren();
+		if (children.size() < 1) {
+			errorstream << "No windows defined. Dropping formspec." << std::endl;
+			forms = nullptr;
+			quitMenu();
+			return;
+		}
+		needsReparse = false;
 	}
 
 	m_font = g_fontengine->getFont();
@@ -662,9 +744,14 @@ void StyleSpec::drawInventorySlot(video::IVideoDriver *driver, gui::IGUISkin *sk
 
 
 // draw text
-void TextSpec::draw(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUIFont *font) {
+void TextSpec::draw(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUIFont *font) const {
 	for (const std::pair<core::stringw, core::rect<s32>> &line : lines) {
 		font->draw(line.first, line.second, video::SColor(0xFFFFFFFF));
+	}
+
+	// draw the cursor
+	if (cursor_visibility) {
+		font->draw(L"_", cursor, video::SColor(0xFFFF0000));
 	}
 }
 
@@ -881,6 +968,12 @@ bool GUIFormSpecMenuNew::OnEvent(const SEvent& event)
 				(kp == getKeySetting("keymap_screenshot"))) {
 			m_client->makeScreenshot();
 		}
+		if (event.KeyInput.PressedDown) {
+			if (focused) {
+				// let the current seleceted menu element deal with it
+				focused->keyDown(event.KeyInput);
+			}
+		}
 		return true;
 	} else if (event.EventType == EET_GUI_EVENT) {
 		if (event.GUIEvent.EventType == gui::EGET_ELEMENT_FOCUS_LOST
@@ -908,6 +1001,11 @@ bool GUIFormSpecMenuNew::OnEvent(const SEvent& event)
 			clicked = hovered;
 			if (clicked)
 				clicked->mouseDown(m_pointer);
+			if (focused)
+				focused->focusChange(false);
+			focused = clicked;
+			if (focused)
+				focused->focusChange(true);
 			break;
 		case EMIE_LMOUSE_LEFT_UP:
 			if (clicked)

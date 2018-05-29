@@ -41,6 +41,7 @@ typedef enum {
 	ELEMENT_BGCOLOR,
 	ELEMENT_INVENTORY,
 	ELEMENT_BUTTON,
+	ELEMENT_INPUT,
 	ELEMENT_TEXT,
 	ELEMENT_IMAGE,
 	ELEMENT_ASPECT,
@@ -63,8 +64,9 @@ typedef enum {
 
 class StyleSpec {
 public:
-	StyleSpec() = default;
+	StyleSpec(gui::IGUIFont *font) : font(font) { };
 	StyleSpec(const StyleSpec &spec) :
+		font(spec.font),
 		buttonStandard(spec.buttonStandard),
 		buttonHover(spec.buttonHover),
 		buttonPressed(spec.buttonPressed),
@@ -85,8 +87,11 @@ public:
 	void setInventoryBorderColor(const video::SColor &color) { inventoryBorderColor = color; }
 	void setInventoryBorder(s32 border) { this->border = border; }
 	void setTextAlign(u8 align) { this->align = align; }
+
+	gui::IGUIFont *getFont() const { return font; }
 	u8 getTextAlign() { return align; }
 private:
+	gui::IGUIFont *font = nullptr;
 	video::ITexture *buttonStandard = nullptr;
 	video::ITexture *buttonHover = nullptr;
 	video::ITexture *buttonPressed = nullptr;
@@ -100,17 +105,25 @@ private:
 
 class TextSpec {
 public:
-	TextSpec(const std::string &t) : text(t) { }
-	void draw(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUIFont *font);
+	TextSpec(const core::stringw &t) : text(t) { }
+	void draw(core::rect<s32> arect, video::IVideoDriver *driver, gui::IGUIFont *font) const;
 
-	void rebuild(const core::rect<s32> &arect, gui::IGUIFont *font, StyleSpec *style);
+	void rebuild(const core::rect<s32> &arect, StyleSpec *style);
+	void setCursorPos(u32 pos) { cursor_pos = pos; }
+	void setCursorVisibility(const bool visibility) { cursor_visibility = visibility; }
+	u32 size() const { return text.size(); }
+
+	void set(const core::stringw &t) { text = t; }
+	const core::stringw &get() const { return text; }
 private:
-	void addLine(const core::rect<s32> &arect, v2s32 pos,
+	void addLine(const core::rect<s32> &arect, v2s32 &pos,
 		const core::dimension2d<u32> &dim, const core::stringw &line);
-
-	std::string text;
+	core::stringw text;
 	std::vector<std::pair<core::stringw, core::rect<s32>>> lines;
+	core::rect<s32> cursor;
+	u32 cursor_pos = -1; // for input types
 	u8 alignment = FORMSPEC_TEXT_ALIGN_CENTER;
+	bool cursor_visibility = false;
 };
 
 class GUIFormSpecMenuElement {
@@ -123,8 +136,8 @@ public:
 	       	bg(element.bg),
 		image(element.image),
 		styleSpec(std::move(element.styleSpec)),
-		children(std::move(element.children)),
 		text(std::move(element.text)),
+		children(std::move(element.children)),
        		style(element.style){ }
 
 	void addChild(std::unique_ptr<GUIFormSpecMenuElement> &element) {
@@ -168,6 +181,9 @@ public:
 
 	virtual void mouseDown(const v2s32 &pos) { }
 	virtual void mouseUp(const v2s32 &pos) { }
+	virtual void keyDown(const SEvent::SKeyInput &k) { }
+	
+	virtual void focusChange(const bool focus) { }
 
 	virtual void draw(video::IVideoDriver *driver, gui::IGUISkin *skin);
 
@@ -183,9 +199,9 @@ protected:
 
 	std::shared_ptr<StyleSpec> styleSpec;
 
+	std::unique_ptr<TextSpec> text = nullptr;
 private:
 	std::vector<std::unique_ptr<GUIFormSpecMenuElement>> children;
-	std::unique_ptr<TextSpec> text = nullptr;
 
 	float aspect = 0.f;
 
@@ -240,6 +256,30 @@ private:
 	core::dimension2d<float> itemSize;
 };
 
+class GUIFormSpecMenuElementInput : public GUIFormSpecMenuElement {
+public:
+	virtual GUIFormSpecMenuElement *getElementAtPos(const v2s32 &pos) {
+		if (arect.isPointInside(pos))
+			return this;
+		return nullptr;
+	}
+	GUIFormSpecMenuElementInput(GUIFormSpecMenuElement &&element) :
+		GUIFormSpecMenuElement::GUIFormSpecMenuElement(std::move(element))
+	{
+		// make sure we have a TextSpec
+		if (!text)
+			text = std::unique_ptr<TextSpec>(new TextSpec(L""));
+		// set the cursor to the end
+		cursor_pos = text->size();
+		text->setCursorPos(cursor_pos);
+	}
+
+	virtual void focusChange(const bool focus);
+	virtual void keyDown(const SEvent::SKeyInput &k);
+private:
+	u32 cursor_pos;
+};
+
 class GUIFormSpecMenuNew : public GUIModalMenu
 {
 public:
@@ -275,6 +315,7 @@ protected:
 	ISimpleTextureSource *m_tsrc;
 	Client *m_client;
 
+	bool needsReparse = true;
 	std::string m_formspec_string;
 
 	v2s32 m_pointer;
@@ -300,6 +341,7 @@ private:
 
 	GUIFormSpecMenuElement *hovered = nullptr;
 	GUIFormSpecMenuElement *clicked = nullptr;
+	GUIFormSpecMenuElement *focused = nullptr;
 
 	void tryClose();
 
