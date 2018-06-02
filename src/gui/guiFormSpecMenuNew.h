@@ -277,6 +277,8 @@ public:
 	virtual void focusChange(const bool focus);
 	virtual void keyDown(const SEvent::SKeyInput &k);
 private:
+	void inputText(const core::stringw &input);
+
 	u32 cursor_pos;
 };
 

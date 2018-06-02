@@ -122,10 +122,8 @@ void TextSpec::rebuild(const core::rect<s32> &arect, StyleSpec *style) {
 
 	lines.clear();
 	u32 width = arect.getWidth();
-	v2s32 pos = arect.UpperLeftCorner;
 
-	// calculate the starting offset of every line
-	std::vector<u32> line_starts;
+	std::vector<std::pair<u32, u32>> line_ranges;
 
 	u32 line_width = 0;
 	u32 line_begin = 0;
@@ -134,50 +132,49 @@ void TextSpec::rebuild(const core::rect<s32> &arect, StyleSpec *style) {
 
 	bool last_space = true;
 	u32 size = text.size();
-	for (u32 i = 0; i < size; ++i) {
-		if (text[i] == L'\n') {
-			// forced newline
-			core::stringw line = core::stringw(text.c_str() + line_begin, i - line_begin);
-			core::dimension2d<u32> dim = font->getDimension(line.c_str());
-			addLine(arect, pos, dim, line);
-			line_starts.push_back(line_begin); // keep the newline symbol for the cursor
-			line_begin = i;
-			word_end = i;
-			word_begin = i;
-			last_space = true;
-			line_width = 0;
-		} else if (text[i] == L' ' || i == size - 1) {
-			/*// word wrap
-			core::stringw word = core::stringw(text.c_str() + word_end, i - word_end); // keep the space
+
+	// first line
+	for (u32 i = 0; i <= size; ++i) {
+		if (text[i] == L' ' || text[i] == L'\n' || i == size) {
+			// word including spaces
+			core::stringw word = text.subString(word_end, i - word_end);
 			core::dimension2d<u32> dim = font->getDimension(word.c_str());
 			line_width += dim.Width;
 			if (line_width > width) {
-				// new line
-				core::stringw line = core::stringw(text.c_str() + line_begin, word_end - line_begin);
-				dim = font->getDimension(line.c_str());
-				addLine(arect, pos, dim, line);
-				line_starts.push_back(line_begin);
+				// word wrap
+				line_ranges.push_back(std::pair<u32, u32>(line_begin, word_end));
 				line_begin = word_begin;
-				word = core::stringw(text.c_str() + word_begin, i - word_begin); // without spaces
+				// word excluding spaces
+				word = text.subString(word_begin, i - word_begin);
 				dim = font->getDimension(word.c_str());
 				line_width = dim.Width;
 			}
 			word_end = i;
-			last_space = true; // */
+			if (text[i] == L'\n' || i == size) {
+				// forced line break
+				line_ranges.push_back(std::pair<u32, u32>(line_begin, i));
+				line_begin = i + 1;
+				word_end = i + 1;
+				line_width = 0;
+				last_space = true;
+			}
+
+			last_space = true;
 		} else {
-			// normal character
+			// regular character
 			if (last_space) {
-				// new word
 				word_begin = i;
 				last_space = false;
 			}
 		}
 	}
-	// push remaining characters as new line
-	line_starts.push_back(line_begin);
-	core::stringw line = core::stringw(text.c_str() + line_begin, size - line_begin);
-	core::dimension2d<u32> dim = font->getDimension(line.c_str());
-	addLine(arect, pos, dim, line);
+
+	v2s32 pos = arect.UpperLeftCorner;
+	for (u32 i = 0; i < line_ranges.size(); ++i) {
+		const core::stringw line = text.subString(line_ranges[i].first, line_ranges[i].second - line_ranges[i].first);
+		const core::dimension2d<u32> dim = font->getDimension(line.c_str());
+		addLine(arect, pos, dim, line);
+	}
 
 
 	// adjust vertical position of the lines
@@ -202,12 +199,11 @@ void TextSpec::rebuild(const core::rect<s32> &arect, StyleSpec *style) {
 			}
 		}
 	}
-
 	// find the cursor position
 	if (cursor_pos != (u32)-1) {
 		size_t i = 0;
-		for ( ; i < line_starts.size(); ++i) {
-			if (cursor_pos < line_starts[i]) {
+		for ( ; i < line_ranges.size(); ++i) {
+			if (cursor_pos < line_ranges[i].first) {
 				// the cursor is in the previous line
 				break;
 			}
@@ -215,7 +211,7 @@ void TextSpec::rebuild(const core::rect<s32> &arect, StyleSpec *style) {
 		// we can safely assume, i is not 0, since cursor_pos is unsigned and the first line starts at 0
 		--i;
 		auto &l = lines[i];
-		u32 end = cursor_pos - line_starts[i];
+		u32 end = cursor_pos - line_ranges[i].first;
 		core::dimension2d<u32> dim = font->getDimension(l.first.subString(0, end).c_str());
 		core::dimension2d<u32> cursor_dim = font->getDimension(L"_");
 		cursor = core::rect<s32>(l.second.UpperLeftCorner + v2s32(dim.Width, 0), cursor_dim);
@@ -281,6 +277,16 @@ void GUIFormSpecMenuElementInput::focusChange(const bool focus) {
 	text->setCursorVisibility(focus);
 }
 
+void GUIFormSpecMenuElementInput::inputText(const core::stringw &input) {
+	const core::stringw &t = text->get();
+	u32 length = t.size();
+	core::stringw newString = t.subString(0, cursor_pos);
+	newString += input;
+	newString += t.subString(cursor_pos, length - cursor_pos);
+	text->set(newString);
+	++cursor_pos;
+}
+
 void GUIFormSpecMenuElementInput::keyDown(const SEvent::SKeyInput &k) {
 	if (k.Key == KEY_BACK && cursor_pos != 0) {
 		const core::stringw &t = text->get();
@@ -289,14 +295,17 @@ void GUIFormSpecMenuElementInput::keyDown(const SEvent::SKeyInput &k) {
 		newString += t.subString(cursor_pos, length - cursor_pos);
 		text->set(newString);
 		--cursor_pos;
-	} else if (k.Char) {
-		const core::stringw &t = text->get();
-		u32 length = t.size();
-		core::stringw newString = t.subString(0, cursor_pos);
-		newString += k.Char;
-		newString += t.subString(cursor_pos, length - cursor_pos);
-		text->set(newString);
-		++cursor_pos;
+	} else if (k.Key == KEY_RETURN) {
+		// irrlicht seems to treat \r as the return character
+		inputText(core::stringw(L"\n"));
+	} else if (!iswcntrl(k.Char) && !k.Control) {
+#if defined(__linux__) && (IRRLICHT_VERSION_MAJOR == 1 && IRRLICHT_VERSION_MINOR < 9)
+		wchar_t wc = L'_';
+		mbtowc( &wc, (char *)&k.Char, sizeof(k.Char));
+		inputText(core::stringw(&wc, 1));
+#else
+		inputText(core::stringw(&k.Char, 1);
+#endif
 	}
 	text->setCursorPos(cursor_pos);
 	text->rebuild(arect, styleSpec.get());
