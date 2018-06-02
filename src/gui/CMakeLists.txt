@@ -5,6 +5,8 @@ set(gui_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/guiEngine.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiFormSpecMenu.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiFormSpecMenuNew.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/guiFormSpecMenuElement.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/guiFormSpecParser.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiKeyChangeMenu.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiPasswordChange.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiPathSelectMenu.cpp
