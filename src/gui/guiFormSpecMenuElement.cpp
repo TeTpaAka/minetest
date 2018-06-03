@@ -29,7 +29,12 @@ void GUIFormSpecMenuElement::setText(const std::string &t) {
 	std::wstring lw = utf8_to_wide(unescape_string(t));
 	text = std::unique_ptr<TextSpec>(new TextSpec(core::stringw(lw.c_str(), lw.size())));
 }
-
+void GUIFormSpecMenuElementInput::setText(const std::string &t) {
+	std::wstring lw = utf8_to_wide(unescape_string(t));
+	text = std::unique_ptr<TextSpec>(new TextSpec(core::stringw(lw.c_str(), lw.size())));
+	cursor_pos = text->size();
+	text->setCursorPos(cursor_pos);
+}
 
 void TextSpec::addLine(const core::rect<s32> &arect, v2s32 &pos,
 		const core::dimension2d<u32> &dim, const core::stringw &line)

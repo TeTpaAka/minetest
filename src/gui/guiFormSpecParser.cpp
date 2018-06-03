@@ -22,284 +22,276 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 #include "log.h"
 #include "util/string.h" // for parseColorString()
 
-static void parseBeginRect(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack) {
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	stack.emplace(std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElement(parent->getStyle())));
-
-	std::vector<std::string> parts = split(description, ',');
-	if (parts.size() < 4) {
-		errorstream << "Invalid beginrect element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-	core::rect<float> dimensions = core::rect<float>(
-			stof(parts[0]), stof(parts[1]),
-			stof(parts[2]), stof(parts[3]));
-
-	stack.top()->setDimensions(dimensions);
-}
-
-static void parseEndRect(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack) {
-	if (stack.size() <= 1) {
-		errorstream << "Too many endrect[] elements." << std::endl;
-	} else {
-		std::unique_ptr<GUIFormSpecMenuElement> child = std::move(stack.top());
-		stack.pop();
-		stack.top()->addChild(child);
-	}
-}
-
-static void parseBGColor(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack) {
-	std::vector<std::string> parts = split(description, ',');
-	if (parts.size() < 1) {
-		errorstream << "Invalid bgcolor element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	video::SColor color;
-	if (parseColorString(parts[0], color, false)) {
-		parent->setBGColor(color);
-	}
-}
-
-static void parseInventory(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack,
-		Client *client, InventoryManager *invmgr) {
-	std::vector<std::string> parts = split(description, ',');
-	if (parts.size() < 5) {
-		errorstream << "Invalid inventory element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	if (parent->isRect()) {
-		std::unique_ptr<GUIFormSpecMenuElementInventory> inventory =
-			std::unique_ptr<GUIFormSpecMenuElementInventory>(new GUIFormSpecMenuElementInventory(std::move(*parent.get())));
-		inventory->setList(invmgr, parts[0], parts[1], client);
-
-		u16 x = stoi(parts[2]);
-		u16 y = stoi(parts[3]);
-
-		inventory->setInventoryDimensions(x, y);
-		parent = std::move(inventory);
-	} else {
-		errorstream << "Attempt to create more than one modifier." << std::endl;
-	}
-}
-
-static void parseButton(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack) {
-	std::vector<std::string> parts = split(description, ',');
-	if (parts.size() < 1) {
-		errorstream << "Invalid button element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	if (parent->isRect()) {
-		std::unique_ptr<GUIFormSpecMenuElementButton> button =
-			std::unique_ptr<GUIFormSpecMenuElementButton>(new GUIFormSpecMenuElementButton(std::move(*parent.get())));
-		parent = std::move(button);
-	} else {
-		errorstream << "Attempt to create more than one modifier." << std::endl;
-	}
-}
-
-static void parseInput(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack) {
-	std::vector<std::string> parts = split(description, ',');
-	if (parts.size() < 1) {
-		errorstream << "Invalid input element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	if (parent->isRect()) {
-		std::unique_ptr<GUIFormSpecMenuElementInput> input =
-			std::unique_ptr<GUIFormSpecMenuElementInput>(new GUIFormSpecMenuElementInput(std::move(*parent.get())));
-		parent = std::move(input);
-	} else {
-		errorstream << "Attempt to create more than one modifier." << std::endl;
-	}
-}
-
-static void parseText(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>>  &stack) {
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	parent->setText(description);
-}
-
-static void parseImage(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack,
-		ISimpleTextureSource *tsrc)
+static void parseStyle(const Json::Value &jsonElem, std::shared_ptr<StyleSpec> &style, ISimpleTextureSource *tsrc)
 {
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	video::ITexture *tex = tsrc->getTexture(description);
-	parent->setImage(tex);
-}
+	Json::Value jsonStyle = jsonElem["style"];
 
-
-static void parseAspect(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack) {
-	std::vector<std::string> parts = split(description, ',');
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	if (parts.size() != 2) {
-		errorstream << "Invalid aspect element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-	float aspect = stof(parts[0]) / stof(parts[1]);
-	parent->setAspect(aspect);
-}
-
-static void parseStyle(const std::string &description, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack,
-		ISimpleTextureSource *tsrc)
-{
-	std::vector<std::string> parts = split(description, ',');
-	std::unique_ptr<GUIFormSpecMenuElement> &parent = stack.top();
-	if (parts.size() < 2) {
-		errorstream << "Invalid style element (" << parts.size() << "): '" << description << "'" << std::endl;
-		return;
-	}
-	std::shared_ptr<StyleSpec> newStyle = std::shared_ptr<StyleSpec>(new StyleSpec(*(parent->getStyle())));
-	bool changed = false;
-	if (parts[0] == "button_standard") {
-		video::ITexture *tex = nullptr;
-		if (!parts[1].empty())
-			tex = tsrc->getTexture(parts[1]);
-		newStyle->setButtonStandard(tex);
-		changed = true;
-	} else if (parts[0] == "button_hover") {
-		video::ITexture *tex = nullptr;
-		if (!parts[1].empty())
-			tex = tsrc->getTexture(parts[1]);
-		newStyle->setButtonHover(tex);
-		changed = true;
-	} else if (parts[0] == "button_pressed") {
-		video::ITexture *tex = nullptr;
-		if (!parts[1].empty())
-			tex = tsrc->getTexture(parts[1]);
-		newStyle->setButtonPressed(tex);
-		changed = true;
-	} else if (parts[0] == "text_align") {
-		changed = true;
-		if (parts[1] == "top") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP);
-		} else if (parts[1] == "topright") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP | FORMSPEC_TEXT_ALIGN_RIGHT);
-		} else if (parts[1] == "right") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_RIGHT);
-		} else if (parts[1] == "bottomright") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM | FORMSPEC_TEXT_ALIGN_RIGHT);
-		} else if (parts[1] == "bottom") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM);
-		} else if (parts[1] == "bottomleft") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM | FORMSPEC_TEXT_ALIGN_LEFT);
-		} else if (parts[1] == "left") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_LEFT);
-		} else if (parts[1] == "topleft") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP | FORMSPEC_TEXT_ALIGN_LEFT);
-		} else if (parts[1] == "center") {
-			newStyle->setTextAlign(FORMSPEC_TEXT_ALIGN_CENTER);
+	if (jsonStyle.isObject()) {
+		style = std::shared_ptr<StyleSpec>(new StyleSpec(*style));
+		if (jsonStyle.isMember("button_standard")) {
+			video::ITexture *tex = nullptr;
+			if (jsonStyle["button_standard"].isString())
+				tex = tsrc->getTexture(jsonStyle["button_standard"].asString());
+			style->setButtonStandard(tex);
 		}
-	} else if (parts[0] == "inventory_background_color") {
-		video::SColor color;
-		if (parseColorString(parts[1], color, false)) {
-			changed = true;
-			newStyle->setInventoryBGColor(color);
+		if (jsonStyle.isMember("button_hover")) {
+			video::ITexture *tex = nullptr;
+			if (jsonStyle["button_hover"].isString())
+				tex = tsrc->getTexture(jsonStyle["button_hover"].asString());
+			style->setButtonHover(tex);
 		}
-	} else if (parts[0] == "inventory_border_color") {
-		video::SColor color;
-		if (parseColorString(parts[1], color, false)) {
-			changed = true;
-			newStyle->setInventoryBorderColor(color);
+		if (jsonStyle.isMember("button_pressed")) {
+			video::ITexture *tex = nullptr;
+			if (jsonStyle["button_pressed"].isString())
+				tex = tsrc->getTexture(jsonStyle["button_pressed"].asString());
+			style->setButtonPressed(tex);
 		}
-	} else if (parts[0] == "inventory_border_width") {
-		changed = true;
-		newStyle->setInventoryBorder(stoi(parts[1]));
-	}
-
-
-
-	if (changed) {
-		parent->setStyle(newStyle);
-	}
-}
-
-static std::unordered_map<std::string, FormSpecElementType> formSpecElementTypes = {
-	{ "beginrect", ELEMENT_BEGINRECT },
-	{ "endrect", ELEMENT_ENDRECT },
-	{ "bgcolor", ELEMENT_BGCOLOR },
-	{ "inventory", ELEMENT_INVENTORY },
-	{ "button", ELEMENT_BUTTON },
-	{ "input", ELEMENT_INPUT },
-	{ "text", ELEMENT_TEXT },
-	{ "image", ELEMENT_IMAGE },
-	{ "aspect", ELEMENT_ASPECT },
-	{ "style", ELEMENT_STYLE }
-};
-
-void GUIFormSpecParser::parseElement(const std::string &element, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack,
-		ISimpleTextureSource *tsrc, Client *client, InventoryManager *invmgr)
-{
-	//some prechecks
-	if (element.empty())
-		return;
-
-	std::vector<std::string> parts = split(element,'[');
-
-	// ugly workaround to keep compatibility
-	if (parts.size() > 2) {
-		if (trim(parts[0]) == "image") {
-			for (unsigned int i=2;i< parts.size(); i++) {
-				parts[1] += "[" + parts[i];
+		if (jsonStyle.isMember("text_align")) {
+			std::string alignment = "center";
+			if (jsonStyle["text_align"].isString())
+				alignment = jsonStyle["text_align"].asString();
+			if (alignment == "top") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP);
+			} else if (alignment == "topright") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP | FORMSPEC_TEXT_ALIGN_RIGHT);
+			} else if (alignment == "right") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_RIGHT);
+			} else if (alignment == "bottomright") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM | FORMSPEC_TEXT_ALIGN_RIGHT);
+			} else if (alignment == "bottom") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM);
+			} else if (alignment == "bottomleft") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_BOTTOM | FORMSPEC_TEXT_ALIGN_LEFT);
+			} else if (alignment == "left") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_LEFT);
+			} else if (alignment == "topleft") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_TOP | FORMSPEC_TEXT_ALIGN_LEFT);
+			} else if (alignment == "center") {
+				style->setTextAlign(FORMSPEC_TEXT_ALIGN_CENTER);
 			}
 		}
-		else { return; }
+		if (jsonStyle.isMember("inventory_background_color")) {
+			video::SColor color;
+			if (jsonStyle["inventory_background_color"].isString()) {
+				if (parseColorString(jsonStyle["inventory_background_color"].asString(), color, false)) {
+					style->setInventoryBGColor(color);
+				}
+			}
+		}
+		if (jsonStyle.isMember("inventory_border_color")) {
+			video::SColor color;
+			if (jsonStyle["inventory_border_color"].isString()) {
+				if (parseColorString(jsonStyle["inventory_border_color"].asString(), color, false)) {
+					style->setInventoryBGColor(color);
+				}
+			}
+		}
+		if (jsonStyle.isMember("inventory_border_width")) {
+			if (jsonStyle["inventory_border_width"].isInt()) {
+				style->setInventoryBorder(jsonStyle["inventory_border_width"].asInt());
+			}
+		}
+	} else if (!jsonStyle.isNull()) {
+		warningstream << "The style member of a formspec element has to be an object." << std::endl;
 	}
+}
 
-	if (parts.size() < 2) {
+static FormSpecElementType parseType(const Json::Value &jsonElem)
+{
+	Json::Value jsonType = jsonElem["type"];
+
+	FormSpecElementType type = ELEMENT_RECT;
+
+	if (jsonType.isString()) {
+		std::string typeString = jsonType.asString();
+		if (typeString == "inventory")
+			type = ELEMENT_INVENTORY;
+		else if (typeString == "button")
+			type = ELEMENT_BUTTON;
+		else if (typeString == "input")
+			type = ELEMENT_INPUT;
+		else
+			warningstream << "Unknow formspec element \"" << typeString << "\"" << std::endl;
+	} else if (!jsonType.isNull()) {
+		warningstream << "The type member of a formspec element has to be a string." << std::endl;
+	}
+	return type;
+}
+
+static void parseRect(const Json::Value &jsonElem, GUIFormSpecMenuElement *elem) {
+	Json::Value jsonRect = jsonElem["rect"];
+	core::rect<float> rect = { 0.f, 0.f, 1.f, 1.f };
+	if (jsonRect.isObject()) {
+		if (jsonRect.isMember("x0") && jsonRect["x0"].isNumeric()) {
+			rect.UpperLeftCorner.X = jsonRect["x0"].asFloat();
+		}
+		if (jsonRect.isMember("y0") && jsonRect["y0"].isNumeric()) {
+			rect.UpperLeftCorner.Y = jsonRect["y0"].asFloat();
+		}
+		if (jsonRect.isMember("x1") && jsonRect["x1"].isNumeric()) {
+			rect.LowerRightCorner.X = jsonRect["x1"].asFloat();
+		}
+		if (jsonRect.isMember("y1") && jsonRect["y1"].isNumeric()) {
+			rect.LowerRightCorner.Y = jsonRect["y1"].asFloat();
+		}
+	} else if (!jsonRect.isNull()) {
+		warningstream << "The rect member of a formspec element has to be an object." << std::endl;
+	}
+	elem->setDimensions(rect);
+}
+
+static void parseAspect(const Json::Value &jsonElem, GUIFormSpecMenuElement *elem) {
+	Json::Value jsonAspect = jsonElem["aspect"];
+	if (jsonAspect.isObject()) {
+		if (jsonAspect.isMember("x") && jsonAspect.isMember("y") &&
+			jsonAspect["x"].isNumeric() && jsonAspect["y"].isNumeric()) {
+			float x, y;
+			x = jsonAspect["x"].asFloat();
+			y = jsonAspect["y"].asFloat();
+			elem->setAspect(x/y);
+		} else {
+			warningstream << "Invalid aspect member in formspec element." << std::endl;
+		}
+	} else if (!jsonAspect.isNull()) {
+		warningstream << "The aspect member of a formspec element has to be an object." << std::endl;
+	}
+}
+
+static void parseBGColor(const Json::Value &jsonElem, GUIFormSpecMenuElement *elem) {
+	Json::Value jsonBGColor = jsonElem["bgcolor"];
+	if (jsonBGColor.isString()) {
+		video::SColor color;
+		if (parseColorString(jsonBGColor.asString(), color, false)) {
+			elem->setBGColor(color);
+		}
+	} else if (!jsonBGColor.isNull()) {
+		warningstream << "The bgcolor member of a formspec element has to be a string." << std::endl;
+	}
+}
+
+static void parseImage(const Json::Value &jsonElem, GUIFormSpecMenuElement *elem, ISimpleTextureSource *tsrc) {
+	Json::Value jsonImage = jsonElem["image"];
+	if (jsonImage.isString()) {
+		video::ITexture *tex = tsrc->getTexture(jsonImage.asString());
+		elem->setImage(tex);
+	} else if (!jsonImage.isNull()) {
+		warningstream << "The image member of a formspec element has to be a string." << std::endl;
+	}
+}
+
+static void parseText(const Json::Value &jsonElem, GUIFormSpecMenuElement *elem) {
+	Json::Value jsonText = jsonElem["text"];
+	if (jsonText.isString()) {
+		elem->setText(jsonText.asString());
+	} else if (!jsonText.isNull()) {
+		warningstream << "The text member of a formspec element has to be a string." << std::endl;
+	}
+}
+
+static void parseInventory(const Json::Value &jsonElem, GUIFormSpecMenuElementInventory *elem,
+		InventoryManager *invmgr, Client *client)
+{
+	u16 columns, rows = 1;
+	Json::Value val = jsonElem["columns"];
+	if (val.isInt()) {
+		columns = val.asInt();
+	} else if (!val.isNull()) {
+		warningstream << "The columns member of a formspec element has to be an integer." << std::endl;
+	}
+	val = jsonElem["rows"];
+	if (val.isInt()) {
+		rows = val.asInt();
+	} else if (!val.isNull()) {
+		warningstream << "The rows member of a formspec element has to be an integer." << std::endl;
+	}
+	elem->setInventoryDimensions(columns, rows);
+
+	std::string location = "current_player";
+	std::string list = "main";
+	val = jsonElem["location"];
+	if (val.isString()) {
+		location = val.asString();
+	} else if (!val.isNull()) {
+		warningstream << "The location member of a formspec element has to be a string." << std::endl;
+	}
+	val = jsonElem["list"];
+	if (val.isString()) {
+		list = val.asString();
+	} else if (!val.isNull()) {
+		warningstream << "The list member of a formspec element has to be a string." << std::endl;
+	}
+	elem->setList(invmgr, location, list, client);
+}
+
+// forward decleration
+static void parseElement(const Json::Value &jsonElem, GUIFormSpecMenuElement *parent, ISimpleTextureSource *tsrc,
+		InventoryManager *invmgr, Client *client);
+static void parseChildren(const Json::Value &jsonElem, GUIFormSpecMenuElement *parent, ISimpleTextureSource *tsrc,
+		InventoryManager *invmgr, Client *client)
+{
+	Json::Value jsonChildren = jsonElem["children"];
+	if (jsonChildren.isArray()) {
+		Json::ArrayIndex size = jsonChildren.size();
+		for (Json::ArrayIndex i = 0; i < size; ++i) {
+			parseElement(jsonChildren[i], parent, tsrc, invmgr, client);
+		}
+	} else if (!jsonChildren.isNull()) {
+		warningstream << "The children member of a formspec element has to be an array." << std::endl;
+	}
+}
+
+static void parseElement(const Json::Value &jsonElem, GUIFormSpecMenuElement *parent, ISimpleTextureSource *tsrc,
+		InventoryManager *invmgr, Client *client)
+{
+	if (!jsonElem.isObject()) {
+		warningstream << "Formspec elements have to be objects." << std::endl;
 		return;
 	}
+	std::shared_ptr<StyleSpec> style = parent->getStyle();
+	parseStyle(jsonElem, style, tsrc);
 
-	std::string typestring = trim(parts[0]);
-	std::string description = trim(parts[1]);
-
-	FormSpecElementType type = ELEMENT_BEGINRECT;
-
-	try {
-		type = formSpecElementTypes.at(typestring);
-	} catch (const std::out_of_range &e) {
-		warningstream << "Unknown DrawSpec: type=" << typestring << ", data=\"" << description << "\""
-			<< std::endl;
-		return;
-	}
-
+	FormSpecElementType type = parseType(jsonElem);
+	std::unique_ptr<GUIFormSpecMenuElement> formSpecElement;
 	switch (type) {
-		case ELEMENT_BEGINRECT:
-			parseBeginRect(description, stack);
-			break;
-		case ELEMENT_ENDRECT:
-			parseEndRect(description, stack);
-			break;
-		case ELEMENT_BGCOLOR:
-			parseBGColor(description, stack);
-			break;
 		case ELEMENT_INVENTORY:
-			parseInventory(description, stack, client, invmgr);
+			formSpecElement = std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElementInventory(style));
+			parseInventory(jsonElem, dynamic_cast<GUIFormSpecMenuElementInventory *>(formSpecElement.get()),
+					invmgr, client);
 			break;
 		case ELEMENT_BUTTON:
-			parseButton(description, stack);
+			formSpecElement = std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElementButton(style));
 			break;
 		case ELEMENT_INPUT:
-			parseInput(description, stack);
+			formSpecElement = std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElementInput(style));
 			break;
-		case ELEMENT_TEXT:
-			parseText(description, stack);
-			break;
-		case ELEMENT_IMAGE:
-			parseImage(description, stack, tsrc);
-			break;
-		case ELEMENT_ASPECT:
-			parseAspect(description, stack);
-			break;
-		case ELEMENT_STYLE:
-			parseStyle(description, stack, tsrc);
+		default:
+			formSpecElement = std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElement(style));
 			break;
 	}
 
-	return;
+	parseRect(jsonElem, formSpecElement.get());
+	parseAspect(jsonElem, formSpecElement.get());
+	parseBGColor(jsonElem, formSpecElement.get());
+	parseText(jsonElem, formSpecElement.get());
+	parseImage(jsonElem, formSpecElement.get(), tsrc);
+	parseChildren(jsonElem, formSpecElement.get(), tsrc, invmgr, client);
+
+	parent->addChild(formSpecElement);
+}
+
+std::unique_ptr<GUIFormSpecMenuElement> GUIFormSpecParser::parse(const std::string &formspec, ISimpleTextureSource *tsrc,
+	Client *client, InventoryManager *invmgr, const std::shared_ptr<StyleSpec> &style)
+{
+	std::unique_ptr<GUIFormSpecMenuElement> main = std::unique_ptr<GUIFormSpecMenuElement>(new GUIFormSpecMenuElement(style));
+	GUIFormSpecMenuElement *parent = main.get();
+
+	Json::Value root;
+	{
+		// parse formspec
+		std::istringstream iss(formspec);
+		iss >> root;
+	}
+	parseElement(root, parent, tsrc, invmgr, client);
+
+	return main;
 }

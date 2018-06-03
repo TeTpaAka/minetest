@@ -4,10 +4,11 @@
 
 #include "client.h"
 
+class StyleSpec;
 class GUIFormSpecMenuElement;
 
 class GUIFormSpecParser {
 public:
-	static void parseElement(const std::string &element, std::stack<std::unique_ptr<GUIFormSpecMenuElement>> &stack,
-		ISimpleTextureSource *tsrc, Client *client, InventoryManager *invmgr);
+	static std::unique_ptr<GUIFormSpecMenuElement> parse(const std::string &formspec, ISimpleTextureSource *tsrc,
+		Client *client, InventoryManager *invmgr, const std::shared_ptr<StyleSpec> &style);
 };

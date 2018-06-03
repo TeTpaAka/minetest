@@ -48,7 +48,7 @@ public:
 	static void create(GUIFormSpecMenuNew *&cur_formspec, Client *client,
 			JoystickController *joystick, const std::string &source);
 	void setFormSource(const std::string &source) {
-		m_formspec_string = source;
+		formspec_string = source;
 	}
 
 	void regenerateGui(v2u32 screensize);
@@ -68,7 +68,7 @@ protected:
 	Client *m_client;
 
 	bool needsReparse = true;
-	std::string m_formspec_string;
+	std::string formspec_string;
 
 	v2s32 m_pointer;
 	v2s32 m_old_pointer;  // Mouse position after previous mouse event

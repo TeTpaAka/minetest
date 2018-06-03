@@ -32,16 +32,10 @@ class ISimpleTextureSource;
 class Client;
 
 typedef enum {
-	ELEMENT_BEGINRECT,
-	ELEMENT_ENDRECT,
-	ELEMENT_BGCOLOR,
+	ELEMENT_RECT,
 	ELEMENT_INVENTORY,
 	ELEMENT_BUTTON,
-	ELEMENT_INPUT,
-	ELEMENT_TEXT,
-	ELEMENT_IMAGE,
-	ELEMENT_ASPECT,
-	ELEMENT_STYLE
+	ELEMENT_INPUT
 } FormSpecElementType;
 
 typedef enum {
@@ -150,7 +144,7 @@ public:
 	void setAspect(float aspect) { this->aspect = aspect;  }
 	void setBGColor(const video::SColor &c) { bg = c; style |= ELEMENT_STYLE_BGCOLOR; }
 	void setImage(video::ITexture *img) { image = img; style |= ELEMENT_STYLE_IMAGE; }
-	void setText(const std::string &t);
+	virtual void setText(const std::string &t);
 
 	const std::shared_ptr<StyleSpec> getStyle() { return styleSpec; }
 	void setStyle(const std::shared_ptr<StyleSpec> styleSpec) {
@@ -254,10 +248,13 @@ private:
 
 class GUIFormSpecMenuElementInput : public GUIFormSpecMenuElement {
 public:
-	virtual GUIFormSpecMenuElement *getElementAtPos(const v2s32 &pos) {
-		if (arect.isPointInside(pos))
-			return this;
-		return nullptr;
+	GUIFormSpecMenuElementInput(const std::shared_ptr<StyleSpec> &style) :
+       		GUIFormSpecMenuElement(style)
+	{
+		text = std::unique_ptr<TextSpec>(new TextSpec(L""));
+		// set the cursor to the end
+		cursor_pos = text->size();
+		text->setCursorPos(cursor_pos);
 	}
 	GUIFormSpecMenuElementInput(GUIFormSpecMenuElement &&element) :
 		GUIFormSpecMenuElement::GUIFormSpecMenuElement(std::move(element))
@@ -270,8 +267,14 @@ public:
 		text->setCursorPos(cursor_pos);
 	}
 
+	virtual GUIFormSpecMenuElement *getElementAtPos(const v2s32 &pos) {
+		if (arect.isPointInside(pos))
+			return this;
+		return nullptr;
+	}
 	virtual void focusChange(const bool focus);
 	virtual void keyDown(const SEvent::SKeyInput &k);
+	virtual void setText(const std::string &t);
 private:
 	void inputText(const core::stringw &input);
 

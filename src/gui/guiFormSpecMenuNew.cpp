@@ -49,7 +49,7 @@ GUIFormSpecMenuNew::GUIFormSpecMenuNew(JoystickController *joystick,
 	m_invmgr(client),
 	m_tsrc(tsrc),
 	m_client(client),
-	m_formspec_string(source),
+	formspec_string(source),
 	m_joystick(joystick),
 	m_remap_dbl_click(remap_dbl_click)
 #ifdef __ANDROID__
@@ -97,34 +97,10 @@ void GUIFormSpecMenuNew::regenerateGui(v2u32 screensize)
 	}
 
 	if (needsReparse) {
-		std::vector<std::string> elements = split(m_formspec_string,']');
-		std::stack<std::unique_ptr<GUIFormSpecMenuElement>> form_stack;
-
-		// insert start proxy
-		defaultStyle = std::shared_ptr<StyleSpec>(new StyleSpec(g_fontengine->getFont()));
-		form_stack.emplace(new GUIFormSpecMenuElement(defaultStyle));
-		for (const std::string &element : elements) {
-			GUIFormSpecParser::parseElement(element, form_stack, m_tsrc, m_client, m_invmgr);
-		}
-		if (form_stack.size() != 1) {
-			errorstream << "Mismatch of beginrect and endrect tags. Dropping formspec." << std::endl;
-			forms = nullptr;
-			quitMenu();
-			return;
-		}
-		forms = std::move(form_stack.top());
-		form_stack.pop();
-		const std::vector<std::unique_ptr<GUIFormSpecMenuElement>> &children = forms->getChildren();
-		if (children.size() < 1) {
-			errorstream << "No windows defined. Dropping formspec." << std::endl;
-			forms = nullptr;
-			quitMenu();
-			return;
-		}
-		needsReparse = false;
+		m_font = g_fontengine->getFont();
+		std::shared_ptr<StyleSpec> style(new StyleSpec(m_font));
+		forms = GUIFormSpecParser::parse(formspec_string, m_tsrc, m_client, m_invmgr, style);
 	}
-
-	m_font = g_fontengine->getFont();
 
 	forms->rebuild(core::rect<s32>(0, 0, screensize.X, screensize.Y), m_font);
 }
